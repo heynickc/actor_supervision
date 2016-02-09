@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Remoting.Metadata.W3cXsd2001;
 using System.Text;
 using System.Threading.Tasks;
 using Akka.Actor;
@@ -15,8 +16,8 @@ namespace ActorSupervisionDeepDive {
         public int AccountId { get; }
         public int ItemId { get; }
         public int Quantity { get; }
-        public decimal ExtPrice { get; }
-        public PlaceOrder(int accountId, int itemId, int quantity, decimal extPrice) {
+        public int ExtPrice { get; }
+        public PlaceOrder(int accountId, int itemId, int quantity, int extPrice) {
             AccountId = accountId;
             ItemId = itemId;
             Quantity = quantity;
@@ -34,18 +35,17 @@ namespace ActorSupervisionDeepDive {
     }
 
     public class ChargeCreditCard {
-        public decimal Amount { get; }
-        public ChargeCreditCard(decimal amount) {
+        public int Amount { get; }
+        public ChargeCreditCard(int amount) {
             Amount = amount;
         }
     }
 
     class AccountCharged {
-        public int Amount { get; }
+        public ChargeCreditCard ChargeInfo { get; }
         public bool Success { get; }
-
-        public AccountCharged(int amount, bool success = false) {
-            Amount = amount;
+        public AccountCharged(ChargeCreditCard chargeInfo, bool success) {
+            ChargeInfo = chargeInfo;
             Success = success;
         }
     }
@@ -60,36 +60,46 @@ namespace ActorSupervisionDeepDive {
         private void PlaceOrderHandler(PlaceOrder placeOrder) {
             var orderActor = Context.ActorOf(
                 Props.Create(
-                    () => new OrderActor()), "orderActor" + DateTime.Now.Ticks);
+                    () => new OrderActor(
+                        (int)DateTime.Now.Ticks)),
+                "orderActor" + DateTime.Now.Ticks);
             orderActor.Tell(placeOrder);
         }
         private void OrderPlacedHandler(OrderPlaced orderPlaced) {
             var accountActor = Context.ActorOf(
                 Props.Create(
-                    () => new AccountActor(orderPlaced.OrderInfo.AccountId)), "accountActor" + DateTime.Now.Ticks);
+                    () => new AccountActor(
+                        orderPlaced.OrderInfo.AccountId)),
+                "accountActor" + orderPlaced.OrderInfo.AccountId);
             accountActor.Tell(new ChargeCreditCard(orderPlaced.OrderInfo.ExtPrice));
         }
         private void AccountChargedHandler(AccountCharged accountCharged) {
             if (accountCharged.Success) {
-                _logger.Info("Account charged!\n{0}", accountCharged);
+                _logger.Info("Account charged!\n{0}",
+                    JsonConvert.SerializeObject(accountCharged));
+                // Sends to TestActor (Test) or CustomerActor (Production)
                 Context.Parent.Tell(accountCharged);
             }
             else {
-                _logger.Error("Error! Account not charged!");
+                _logger.Warning("Error! Account not charged!");
+                // Sends to TestActor (Test) or CustomerActor (Production)
                 Context.Parent.Tell(accountCharged);
             }
         }
 
         protected override SupervisorStrategy SupervisorStrategy() {
             return new OneForOneStrategy(
-                maxNrOfRetries: 3, 
-                withinTimeRange: TimeSpan.FromSeconds(30),
-                localOnlyDecider: x => Directive.Restart);
+                Decider.From(x => {
+                    if (x is StripeException) return Directive.Resume;
+                    return Directive.Restart;
+                }));
         }
     }
 
     class OrderActor : ReceiveActor {
-        public OrderActor() {
+        public int OrderId { get; }
+        public OrderActor(int orderId) {
+            OrderId = orderId;
             Receive<PlaceOrder>(placeOrder => PlaceOrderHandler(placeOrder));
         }
         public void PlaceOrderHandler(PlaceOrder placeOrder) {
@@ -100,41 +110,39 @@ namespace ActorSupervisionDeepDive {
 
     public class AccountActor : ReceiveActor {
         public int AccountId { get; }
-        private readonly IStripeGateway _stripeGateway;
+        private readonly IStripeGateway _stripeGateway = new StripeGateway();
         private readonly ILoggingAdapter _logger = Context.GetLogger();
         public AccountActor(int accountId) {
             AccountId = accountId;
             Receive<ChargeCreditCard>(
                 chargeCreditCard => ChargeCreditCardHandler(chargeCreditCard));
-            // TODO: DI
-            _stripeGateway = new StripeGateway();
         }
         private void ChargeCreditCardHandler(ChargeCreditCard chargeCreditCard) {
-
-            //var stripeCharge = Policy
-            //    .Handle<StripeException>()
-            //    .Retry(3)
-            //    .Execute(() => _stripeGateway.CreateCharge(chargeCreditCard.Amount));
-
-            var stripeCharge = _stripeGateway.CreateCharge(chargeCreditCard.Amount);
-
-            if (stripeCharge != null) Context.Parent.Tell(new AccountCharged(stripeCharge.Amount, true));
+            StripeCharge stripeCharge = null;
+            try {
+                stripeCharge = _stripeGateway
+                    .CreateCharge(chargeCreditCard.Amount);
+                if (stripeCharge != null)
+                    Context.Parent.Tell(new AccountCharged(chargeCreditCard, true));
+            }
+            catch (Exception) {
+                Context.Parent.Tell(new AccountCharged(chargeCreditCard, false));
+                throw;
+            }
         }
 
-        protected override void PreRestart(Exception reason, object message) {
-            _logger.Warning("AccountActor got restarted from message:\n{0}",
-                JsonConvert.SerializeObject(message));
-            //Self.Tell(message);
-            base.PreRestart(reason, message);
+        protected override void PostStop() {
+            _logger.Warning("AccountActor stopped!");
+            base.PostStop();
         }
     }
 
     internal interface IStripeGateway {
-        StripeCharge CreateCharge(decimal amount);
+        StripeCharge CreateCharge(int amount);
     }
 
     public class StripeGateway : IStripeGateway {
-        public StripeCharge CreateCharge(decimal amount) {
+        public StripeCharge CreateCharge(int amount) {
             if (amount < 0) {
                 throw new StripeException(
                     System.Net.HttpStatusCode.OK,
@@ -142,7 +150,7 @@ namespace ActorSupervisionDeepDive {
                     @"Can't charge card a negative value");
             }
             return new StripeCharge() {
-                Amount = (int) (amount * 100),
+                Amount = amount,
                 Captured = true
             };
         }

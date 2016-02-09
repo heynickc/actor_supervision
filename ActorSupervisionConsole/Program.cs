@@ -16,11 +16,11 @@ namespace ActorSupervisionConsole {
                 IActorRef orderProcessorActor = MyActorSystem.ActorOf(Props.Create(() => new OrderProcessorActor()));
                 var key = Console.ReadLine();
                 if (key == "order") {
-                    var goodMessage = new PlaceOrder(12345, 10, 25, 50.00m);
+                    var goodMessage = new PlaceOrder(12345, 10, 25, 5000);
                     orderProcessorActor.Tell(goodMessage);
                 }
                 if (key == "badorder") {
-                    var badMessage = new PlaceOrder(12345, 10, 25, -50.00m);
+                    var badMessage = new PlaceOrder(12345, 10, 25, -5000);
                     orderProcessorActor.Tell(badMessage);
                 }
                 else if (key == "exit") {
