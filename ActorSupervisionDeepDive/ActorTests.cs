@@ -112,7 +112,7 @@ namespace ActorSupervisionDeepDive {
         }
 
         [Fact]
-        public void OrderProcessorActor_gets_accountCharged_unsuccessful_message() {
+        public void OrderProcessorActor_applies_custom_supervisor_strategy() {
             var message = new PlaceOrder(12345, 10, 25, -5000);
             var orderProcessorActor = ActorOfAsTestActorRef(
                 () => new OrderProcessorActor(), TestActor);
@@ -127,7 +127,7 @@ namespace ActorSupervisionDeepDive {
             var orderProcessorActor = ActorOfAsTestActorRef(
                         () => new OrderProcessorActor(), TestActor);
             
-            EventFilter.Warning("Error! Account not charged!")
+            EventFilter.Error("Error! Account not charged!")
                 .ExpectOne(() => orderProcessorActor.Tell(message));
         }
     }

@@ -81,7 +81,7 @@ namespace ActorSupervisionDeepDive {
                 Context.Parent.Tell(accountCharged);
             }
             else {
-                _logger.Warning("Error! Account not charged!");
+                _logger.Error("Error! Account not charged!");
                 // Sends to TestActor (Test) or CustomerActor (Production)
                 Context.Parent.Tell(accountCharged);
             }
@@ -92,7 +92,8 @@ namespace ActorSupervisionDeepDive {
                 Decider.From(x => {
                     if (x is StripeException) return Directive.Resume;
                     return Directive.Restart;
-                }));
+                })
+            );
         }
     }
 
@@ -146,8 +147,9 @@ namespace ActorSupervisionDeepDive {
             if (amount < 0) {
                 throw new StripeException(
                     System.Net.HttpStatusCode.OK,
-                    new StripeError() { Code = "card_error" },
-                    @"Can't charge card a negative value");
+                    new StripeError() {
+                        Code = "card_error"
+                    }, "Can't charge card a negative value");
             }
             return new StripeCharge() {
                 Amount = amount,
