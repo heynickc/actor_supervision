@@ -95,7 +95,7 @@ namespace ActorSupervisionDeepDive {
             var message = new ChargeCreditCard(-5000);
             var accountActor = ActorOf(
                 Props.Create(() => new AccountActor(12345),
-                SupervisorStrategy.StoppingStrategy));
+                SupervisorStrategy.DefaultStrategy));
 
             EventFilter.Warning("AccountActor stopped!")
                 .ExpectOne(() => accountActor.Tell(message));
